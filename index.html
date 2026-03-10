@@ -323,7 +323,7 @@
 
     <div class="key-banner" id="key-banner">
         <span>API Key</span>
-        <input class="key-input" type="password" id="api-key-input" placeholder="sk-ant-..." autocomplete="off">
+        <input class="key-input" type="password" id="api-key-input" placeholder="AIza..." autocomplete="off">
         <button class="key-save" id="key-save-btn" onclick="saveKey()">Save</button>
     </div>
 
@@ -364,6 +364,11 @@ function loadKey() {
         document.getElementById('key-save-btn').innerText = '✓';
         document.getElementById('key-save-btn').classList.add('key-saved');
     }
+}
+
+
+function geminiText(data) {
+    return data?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
 }
 
 // ===== STATE =====
@@ -466,23 +471,18 @@ async function extractImage(file) {
     const base64 = await fileToBase64(file);
     const mediaType = file.type || 'image/jpeg';
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${getKey()}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            model: 'claude-sonnet-4-20250514',
-            max_tokens: 4000,
-            messages: [{
-                role: 'user',
-                content: [
-                    { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
-                    { type: 'text', text: 'Extract all text from this image. Output only the text, preserving paragraph structure. No commentary.' }
-                ]
-            }]
+            contents: [{ parts: [
+                { inline_data: { mime_type: mediaType, data: base64 } },
+                { text: 'Extract all text from this image. Output only the text, preserving paragraph structure. No commentary.' }
+            ]}]
         })
     });
     const data = await res.json();
-    rawText = data.content?.map(b => b.text || '').join('') || '';
+    rawText = geminiText(data);
     if (!rawText) throw new Error('No text found in image');
 }
 
@@ -514,7 +514,7 @@ function showFileLoaded(name, wordCount) {
 
 // ===== GENERATE =====
 async function generate() {
-    if (!getKey()) { alert('Please enter your Anthropic API key first.'); document.getElementById('api-key-input').focus(); return; }
+    if (!getKey()) { alert('Please enter your Gemini API key first.'); document.getElementById('api-key-input').focus(); return; }
     // Get text
     const activeTab = document.querySelector('.itab.active').innerText.toLowerCase();
     if (activeTab.includes('paste')) rawText = document.getElementById('text-input').value.trim();
@@ -538,20 +538,15 @@ async function generate() {
     };
 
     try {
-        const res = await fetch('https://api.anthropic.com/v1/messages', {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${getKey()}`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-api-key': getKey(), 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'claude-sonnet-4-20250514',
-                max_tokens: 4000,
-                messages: [{
-                    role: 'user',
-                    content: `Summarize the following text in approximately ${targetWords} words. ${stylePrompts[summaryStyle] || ''} Output only the summary, no preamble.\n\n---\n\n${rawText.slice(0, 80000)}`
-                }]
+                contents: [{ parts: [{ text: `Summarize the following text in approximately ${targetWords} words. ${stylePrompts[summaryStyle] || ''} Output only the summary, no preamble.\n\n---\n\n${rawText.slice(0, 80000)}` }] }]
             })
         });
         const data = await res.json();
-        const summary = data.content?.map(b => b.text || '').join('') || '';
+        const summary = geminiText(data);
         if (!summary) throw new Error('Empty response');
         loadReader(summary);
     } catch(e) {
@@ -576,20 +571,15 @@ async function tagTextWithAI(text) {
     // Sample first 300 unique words for POS tagging — enough for a representative pass
     const words = [...new Set(text.split(/\s+/).map(w => w.replace(/[^a-zA-Z]/g,'').toLowerCase()))].slice(0, 300).join(' ');
     try {
-        const res = await fetch('https://api.anthropic.com/v1/messages', {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${getKey()}`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-api-key': getKey(), 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'claude-sonnet-4-20250514',
-                max_tokens: 2000,
-                messages: [{
-                    role: 'user',
-                    content: `For each word below, output "word:N" for noun, "word:V" for verb, "word:O" for other. One per line, no extra text.\n\n${words}`
-                }]
+                contents: [{ parts: [{ text: `For each word below, output "word:N" for noun, "word:V" for verb, "word:O" for other. One per line, no extra text.\n\n${words}` }] }]
             })
         });
         const data = await res.json();
-        const lines = (data.content?.[0]?.text || '').split('\n');
+        const lines = geminiText(data).split('\n');
         posTagCache = {};
         lines.forEach(line => {
             const [word, tag] = line.split(':');

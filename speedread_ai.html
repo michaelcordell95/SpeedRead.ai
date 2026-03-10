@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SpeedRead AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+    :root {
+        --bg:      #0f0f0f;
+        --surface: #171717;
+        --border:  #262626;
+        --border2: #333;
+        --text:    #e8e3dc;
+        --sub:     #6b6560;
+        --dim:     #2e2b28;
+        --accent:  #e8b86d;
+        --accent2: #c49a4a;
+        --c-noun:   #c8a97e;
+        --c-verb:   #6b9fd4;
+        --c-logic:  #f0f0f0;
+        --c-filler: #5a5248;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: 'DM Sans', system-ui, sans-serif;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 36px 20px 80px;
+        gap: 10px;
+    }
+    body::before {
+        content: '';
+        position: fixed; inset: 0;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+        pointer-events: none; z-index: 0;
+    }
+    body > * { position: relative; z-index: 1; }
+
+    /* ── Logo ── */
+    .logo-wrap { padding: 24px 0 32px; text-align: center; }
+    .logo-eyebrow { font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--accent); margin-bottom: 10px; }
+    .tagline { font-size: 13px; color: var(--sub); margin-top: 8px; }
+
+    /* ── Container ── */
+    .container { width: 100%; max-width: 720px; display: flex; flex-direction: column; gap: 10px; }
+
+    /* ── Reader ── */
+    .reader-wrap {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 28px 28px 20px;
+    }
+    .reader-placeholder {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100px;
+        color: var(--sub);
+        font-size: 13px;
+        font-family: 'DM Mono', monospace;
+        letter-spacing: 0.06em;
+    }
+    .reader-rows { display: flex; flex-direction: column; gap: 5px; margin-bottom: 20px; }
+    .s-row {
+        font-size: clamp(16px, 2.2vh, 23px);
+        line-height: 1.75;
+        letter-spacing: 0.01em;
+        overflow: hidden;
+        white-space: nowrap;
+        transition: opacity 0.08s, transform 0.08s;
+    }
+    .s-row.active-row { opacity: 1; }
+    .s-row.prev-row   { opacity: 0.1; }
+    .s-row.next-row   { opacity: 0.25; }
+    .s-row.exiting    { opacity: 0; transform: translateY(-8px); }
+    .s-row.entering   { opacity: 0; }
+
+    .s-word { position: relative; display: inline; color: var(--text); }
+    .s-word.active-word::after {
+        content: ''; position: absolute;
+        bottom: -2px; left: 0; width: 100%; height: 2px;
+        background: var(--accent); border-radius: 1px;
+        box-shadow: 0 0 10px rgba(232,184,109,0.45);
+    }
+    .s-word.past-word { color: #2a2724 !important; font-weight: normal !important; }
+
+    /* Syntax */
+    .syn-noun   { color: var(--c-noun) !important; }
+    .syn-verb   { color: var(--c-verb) !important; }
+    .syn-logic  { color: var(--c-logic) !important; }
+    .syn-filler { color: var(--c-filler) !important; }
+
+    .progress-track { width: 100%; height: 2px; background: var(--dim); border-radius: 1px; }
+    .progress-fill  { height: 100%; background: var(--accent); border-radius: 1px; width: 0%; transition: width 0.2s; }
+    .progress-meta  { display: flex; justify-content: space-between; margin-top: 5px; }
+    .progress-meta span { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--sub); }
+
+    .reader-controls {
+        display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+        margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);
+    }
+    .rc-btn {
+        background: transparent; border: 1px solid var(--border2); color: var(--sub);
+        padding: 5px 14px; border-radius: 6px; cursor: pointer; font-size: 12px;
+        font-family: 'DM Sans', sans-serif; letter-spacing: 0.02em; transition: all 0.12s;
+    }
+    .rc-btn:hover { color: var(--text); border-color: #444; }
+    .rc-btn.on { border-color: var(--accent); color: var(--accent); background: rgba(232,184,109,0.06); }
+    .rc-spacer { flex: 1; }
+    .wpm-pill {
+        display: flex; align-items: center; gap: 6px;
+        background: var(--dim); border-radius: 7px; padding: 4px 10px 4px 12px;
+    }
+    .wpm-pill span { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--sub); letter-spacing: 0.12em; text-transform: uppercase; }
+    .wpm-pill input { width: 52px; background: transparent; border: none; color: var(--text); font-size: 13px; font-family: 'DM Mono', monospace; text-align: center; padding: 0; }
+    .wpm-pill input:focus { outline: none; }
+    .syntax-lbl { display: flex; align-items: center; gap: 5px; font-family: 'DM Mono', monospace; font-size: 10px; color: var(--sub); letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer; }
+
+    /* ── Divider ── */
+    .div-line { width: 100%; height: 1px; background: var(--border); margin: 2px 0; }
+
+    /* ── Import ── */
+    .import-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+    .import-tabs { display: flex; border-bottom: 1px solid var(--border); }
+    .itab {
+        flex: 1; background: transparent; border: none; border-right: 1px solid var(--border);
+        color: var(--sub); padding: 10px 0; font-size: 12px; font-family: 'DM Sans', sans-serif;
+        letter-spacing: 0.03em; cursor: pointer; transition: all 0.12s;
+    }
+    .itab:last-child { border-right: none; }
+    .itab:hover { color: var(--text); background: rgba(255,255,255,0.02); }
+    .itab.active { color: var(--accent); background: rgba(232,184,109,0.04); }
+    textarea {
+        width: 100%; height: 90px; background: transparent; border: none;
+        color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 14px;
+        line-height: 1.6; padding: 16px 20px; resize: none;
+    }
+    textarea:focus { outline: none; }
+    textarea::placeholder { color: var(--sub); font-style: italic; }
+    .drop-area {
+        padding: 30px 20px; text-align: center; cursor: pointer; color: var(--sub);
+        font-size: 13px; transition: all 0.12s; margin: 8px; border-radius: 8px;
+        border: 2px dashed transparent;
+    }
+    .drop-area:hover, .drop-area.drag-over { color: var(--text); border-color: var(--border2); }
+    .drop-area .drop-icon { font-size: 22px; margin-bottom: 8px; }
+    .drop-area .drop-sub { font-size: 11px; color: var(--sub); margin-top: 4px; }
+    .file-loaded {
+        margin: 0 16px 12px; padding: 10px 14px; border-radius: 8px;
+        background: rgba(46,160,67,0.08); border: 1px solid rgba(46,160,67,0.25);
+        font-size: 12px; color: #4caf72; font-family: 'DM Mono', monospace;
+        display: none;
+    }
+
+    /* ── Settings row ── */
+    .settings-row { display: flex; gap: 10px; align-items: stretch; }
+
+    .time-pill {
+        flex: 1; background: var(--surface); border: 1px solid var(--border);
+        border-radius: 10px; padding: 12px 18px; display: flex; align-items: center; gap: 10px;
+    }
+    .time-pill-label { font-size: 13px; color: var(--sub); white-space: nowrap; }
+    .time-pill input {
+        background: var(--dim); border: none; color: var(--text); font-size: 20px;
+        font-weight: 500; font-family: 'DM Sans', sans-serif; width: 80px;
+        text-align: center; border-radius: 6px; padding: 2px 8px; flex: 1;
+    }
+    .time-pill input:focus { outline: none; background: #3a3530; }
+    .time-pill-unit { font-size: 13px; color: var(--sub); }
+
+    .style-wrap {
+        flex: 1; background: var(--surface); border: 1px solid var(--border);
+        border-radius: 10px; padding: 12px 16px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+    }
+    .style-label { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--sub); letter-spacing: 0.12em; text-transform: uppercase; margin-right: 2px; white-space: nowrap; }
+    .chip {
+        background: transparent; border: 1px solid var(--border2); color: var(--sub);
+        padding: 4px 11px; border-radius: 20px; font-size: 11px; font-family: 'DM Sans', sans-serif;
+        cursor: pointer; transition: all 0.12s; white-space: nowrap;
+    }
+    .chip:hover { color: var(--text); border-color: #444; }
+    .chip.active { border-color: var(--accent); color: var(--accent); background: rgba(232,184,109,0.07); }
+
+    /* ── Go button ── */
+    .go-btn {
+        width: 100%; background: var(--accent); color: #0f0f0f; border: none;
+        padding: 13px; border-radius: 10px; font-size: 14px; font-weight: 600;
+        font-family: 'DM Sans', sans-serif; letter-spacing: 0.03em; cursor: pointer;
+        transition: background 0.12s, transform 0.08s;
+    }
+    .go-btn:hover { background: #d4a45c; }
+    .go-btn:active { transform: scale(0.995); }
+    .go-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+
+    /* ── API Key banner ── */
+    .key-banner {
+        width: 100%; max-width: 720px;
+        background: rgba(232,184,109,0.06);
+        border: 1px solid rgba(232,184,109,0.2);
+        border-radius: 10px;
+        padding: 10px 16px;
+        display: flex; align-items: center; gap: 10px;
+        font-size: 12px;
+    }
+    .key-banner span { color: var(--sub); font-family: 'DM Mono', monospace; letter-spacing: 0.05em; white-space: nowrap; }
+    .key-input {
+        flex: 1; background: transparent; border: none;
+        color: var(--text); font-family: 'DM Mono', monospace; font-size: 12px;
+        letter-spacing: 0.05em; min-width: 0;
+    }
+    .key-input:focus { outline: none; }
+    .key-input::placeholder { color: var(--dim); }
+    .key-save {
+        background: transparent; border: 1px solid var(--border2); color: var(--sub);
+        padding: 3px 12px; border-radius: 5px; font-size: 11px; font-family: 'DM Sans', sans-serif;
+        cursor: pointer; white-space: nowrap; transition: all 0.12s;
+    }
+    .key-save:hover { color: var(--accent); border-color: var(--accent); }
+    .key-saved { color: #4caf72 !important; border-color: #4caf72 !important; }
+
+    /* ── Overlay ── */
+    #overlay {
+        display: none; position: fixed; inset: 0;
+        background: rgba(15,15,15,0.88); z-index: 999;
+        align-items: center; justify-content: center; flex-direction: column; gap: 16px;
+    }
+    #overlay.show { display: flex; }
+    .spinner { width: 32px; height: 32px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .overlay-text { color: var(--text); font-size: 14px; font-family: 'DM Sans', sans-serif; }
+    .overlay-sub  { color: var(--sub); font-size: 12px; font-family: 'DM Mono', monospace; letter-spacing: 0.06em; }
+</style>
+</head>
+<body>
+
+<div class="logo-wrap">
+    <div class="logo-eyebrow">⚡ speedread ai</div>
+    <div class="tagline">Paste anything · AI summarizes it · Read it in minutes</div>
+</div>
+
+<div class="container">
+
+    <!-- READER -->
+    <div class="reader-wrap" id="reader-wrap">
+        <div class="reader-placeholder" id="reader-placeholder">
+            paste text below and hit go to start reading
+        </div>
+        <div class="reader-rows" id="reader-rows" style="display:none">
+            <div class="s-row prev-row"   id="row-0"></div>
+            <div class="s-row active-row" id="row-1"></div>
+            <div class="s-row next-row"   id="row-2"></div>
+        </div>
+        <div id="reader-footer" style="display:none">
+            <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+            <div class="progress-meta">
+                <span id="progress-text">Line 0 / 0</span>
+                <span id="time-remaining">—</span>
+            </div>
+            <div class="reader-controls">
+                <button class="rc-btn on" id="play-btn" onclick="togglePlay()">▶ Start</button>
+                <button class="rc-btn" onclick="restartReader()">↺</button>
+                <div class="rc-spacer"></div>
+                <label class="syntax-lbl"><input type="checkbox" id="syntax-toggle" onchange="rebuildLines()"> Syntax</label>
+                <div class="wpm-pill">
+                    <span>WPM</span>
+                    <input type="number" id="reader-wpm" value="300" min="50" max="2000" oninput="updateWpm()">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="div-line"></div>
+
+    <!-- IMPORT -->
+    <div class="import-wrap">
+        <div class="import-tabs">
+            <button class="itab active" onclick="switchTab('paste')">Paste Text</button>
+            <button class="itab" onclick="switchTab('upload')">Upload File</button>
+        </div>
+        <div id="tab-paste">
+            <textarea id="text-input" placeholder="Paste any text — article, book chapter, research paper..."></textarea>
+        </div>
+        <div id="tab-upload" style="display:none">
+            <div class="drop-area" id="drop-area"
+                 onclick="document.getElementById('file-input').click()"
+                 ondragover="handleDragOver(event)"
+                 ondragleave="this.classList.remove('drag-over')"
+                 ondrop="handleDrop(event)">
+                <div class="drop-icon">📎</div>
+                <strong>Drop a file or tap to browse</strong>
+                <div class="drop-sub">PDF · EPUB · Image · TXT</div>
+                <input type="file" id="file-input" accept=".pdf,.epub,.txt,.png,.jpg,.jpeg,.webp" style="display:none" onchange="handleFile(this.files[0])">
+            </div>
+            <div class="file-loaded" id="file-loaded"></div>
+        </div>
+    </div>
+
+    <!-- SETTINGS -->
+    <div class="settings-row">
+        <div class="time-pill">
+            <span class="time-pill-label">Summary length</span>
+            <input type="number" id="words-input" value="500" min="100" max="50000">
+            <span class="time-pill-unit">words</span>
+        </div>
+        <div class="style-wrap">
+            <span class="style-label">Style</span>
+            <button class="chip" onclick="selectStyle(this,'prose')">Prose</button>
+            <button class="chip" onclick="selectStyle(this,'bullets')">Key Points</button>
+            <button class="chip" onclick="selectStyle(this,'simple')">Simple</button>
+            <button class="chip active" onclick="selectStyle(this,'none')">As-Is</button>
+        </div>
+    </div>
+
+
+    <div class="key-banner" id="key-banner">
+        <span>API Key</span>
+        <input class="key-input" type="password" id="api-key-input" placeholder="sk-ant-..." autocomplete="off">
+        <button class="key-save" id="key-save-btn" onclick="saveKey()">Save</button>
+    </div>
+
+    <button class="go-btn" id="go-btn" onclick="generate()">⚡ Summarize &amp; Read</button>
+
+</div>
+
+<!-- Overlay -->
+<div id="overlay">
+    <div class="spinner"></div>
+    <div class="overlay-text" id="overlay-text">Working...</div>
+    <div class="overlay-sub" id="overlay-sub"></div>
+</div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+
+// ===== API KEY =====
+function getKey() {
+    return localStorage.getItem('speedread_api_key') || '';
+}
+
+function saveKey() {
+    const val = document.getElementById('api-key-input').value.trim();
+    if (!val) return;
+    localStorage.setItem('speedread_api_key', val);
+    const btn = document.getElementById('key-save-btn');
+    btn.innerText = '✓ Saved';
+    btn.classList.add('key-saved');
+    setTimeout(() => { btn.innerText = 'Save'; btn.classList.remove('key-saved'); }, 2000);
+}
+
+function loadKey() {
+    const k = getKey();
+    if (k) {
+        document.getElementById('api-key-input').value = k;
+        document.getElementById('key-save-btn').innerText = '✓';
+        document.getElementById('key-save-btn').classList.add('key-saved');
+    }
+}
+
+// ===== STATE =====
+let rawText = '';
+let summaryStyle = 'none';
+let readerText = '';
+let lines = [];
+let lineIdx = 0;
+let wordIdx = 0;
+let wordSpans = [];
+let playing = false;
+let timer = null;
+let msPerWord = 200;
+let transitioning = false;
+let activeRow = 0; // which of the 3 rows is currently active (0,1,2)
+
+// ===== TAB =====
+function switchTab(tab) {
+    document.getElementById('tab-paste').style.display = tab === 'paste' ? 'block' : 'none';
+    document.getElementById('tab-upload').style.display = tab === 'upload' ? 'block' : 'none';
+    document.querySelectorAll('.itab').forEach((btn, i) => {
+        btn.classList.toggle('active', ['paste','upload'][i] === tab);
+    });
+}
+
+function selectStyle(btn, style) {
+    document.querySelectorAll('.chip').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    summaryStyle = style;
+    // Hide word count when As-Is
+    document.querySelector('.time-pill').style.opacity = style === 'none' ? '0.4' : '1';
+    document.querySelector('.time-pill input').disabled = style === 'none';
+}
+
+// ===== FILE HANDLING =====
+function handleDragOver(e) {
+    e.preventDefault();
+    document.getElementById('drop-area').classList.add('drag-over');
+}
+function handleDrop(e) {
+    e.preventDefault();
+    document.getElementById('drop-area').classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+}
+
+async function handleFile(file) {
+    if (!file) return;
+    const ext = file.name.split('.').pop().toLowerCase();
+    showOverlay('Reading file...', file.name);
+
+    try {
+        if (ext === 'pdf') {
+            await extractPDF(file);
+        } else if (ext === 'epub') {
+            await extractEPUB(file);
+        } else if (['png','jpg','jpeg','webp'].includes(ext)) {
+            await extractImage(file);
+        } else {
+            // plain text
+            rawText = await file.text();
+        }
+        showFileLoaded(file.name, rawText.split(/\s+/).length);
+    } catch(e) {
+        alert('Could not read file: ' + e.message);
+    }
+    hideOverlay();
+}
+
+async function extractPDF(file) {
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    let text = '';
+    for (let p = 1; p <= pdf.numPages; p++) {
+        updateOverlaySub(`Page ${p} of ${pdf.numPages}`);
+        const page = await pdf.getPage(p);
+        const content = await page.getTextContent();
+        text += content.items.map(i => i.str).join(' ') + ' ';
+    }
+    rawText = text.trim();
+}
+
+async function extractEPUB(file) {
+    const JSZip = await loadJSZip();
+    const buf = await file.arrayBuffer();
+    const zip = await JSZip.loadAsync(buf);
+    let text = '';
+    const htmlFiles = Object.keys(zip.files).filter(n => /\.(html|xhtml|htm)$/i.test(n));
+    for (const name of htmlFiles) {
+        const html = await zip.files[name].async('string');
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        if (doc.body) text += doc.body.innerText + ' ';
+    }
+    rawText = text.replace(/\s+/g, ' ').trim();
+}
+
+async function extractImage(file) {
+    // Convert to base64 and send to Claude vision
+    showOverlay('Reading image with AI...', 'Extracting text');
+    const base64 = await fileToBase64(file);
+    const mediaType = file.type || 'image/jpeg';
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            model: 'claude-sonnet-4-20250514',
+            max_tokens: 4000,
+            messages: [{
+                role: 'user',
+                content: [
+                    { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+                    { type: 'text', text: 'Extract all text from this image. Output only the text, preserving paragraph structure. No commentary.' }
+                ]
+            }]
+        })
+    });
+    const data = await res.json();
+    rawText = data.content?.map(b => b.text || '').join('') || '';
+    if (!rawText) throw new Error('No text found in image');
+}
+
+function fileToBase64(file) {
+    return new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result.split(',')[1]);
+        r.onerror = rej;
+        r.readAsDataURL(file);
+    });
+}
+
+function loadJSZip() {
+    return new Promise((res, rej) => {
+        if (window.JSZip) { res(window.JSZip); return; }
+        const s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+        s.onload = () => res(window.JSZip);
+        s.onerror = rej;
+        document.head.appendChild(s);
+    });
+}
+
+function showFileLoaded(name, wordCount) {
+    const el = document.getElementById('file-loaded');
+    el.style.display = 'block';
+    el.innerText = `✓ ${name} — ${wordCount.toLocaleString()} words`;
+}
+
+// ===== GENERATE =====
+async function generate() {
+    if (!getKey()) { alert('Please enter your Anthropic API key first.'); document.getElementById('api-key-input').focus(); return; }
+    // Get text
+    const activeTab = document.querySelector('.itab.active').innerText.toLowerCase();
+    if (activeTab.includes('paste')) rawText = document.getElementById('text-input').value.trim();
+    if (!rawText) { alert('Please add some text first.'); return; }
+
+    const targetWords = parseInt(document.getElementById('words-input').value) || 500;
+    const inputWords = rawText.split(/\s+/).length;
+
+    if (summaryStyle === 'none' || inputWords <= targetWords * 1.1) {
+        loadReader(rawText);
+        return;
+    }
+
+    // Summarize with AI — first pre-tag with POS for syntax
+    showOverlay('Summarizing with AI...', `${inputWords.toLocaleString()} → ${targetWords.toLocaleString()} words`);
+
+    const stylePrompts = {
+        prose:   'Write in clear, flowing prose.',
+        bullets: 'Write as concise bullet points, one idea per line.',
+        simple:  'Write in simple, plain language.'
+    };
+
+    try {
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-api-key': getKey(), 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+            body: JSON.stringify({
+                model: 'claude-sonnet-4-20250514',
+                max_tokens: 4000,
+                messages: [{
+                    role: 'user',
+                    content: `Summarize the following text in approximately ${targetWords} words. ${stylePrompts[summaryStyle] || ''} Output only the summary, no preamble.\n\n---\n\n${rawText.slice(0, 80000)}`
+                }]
+            })
+        });
+        const data = await res.json();
+        const summary = data.content?.map(b => b.text || '').join('') || '';
+        if (!summary) throw new Error('Empty response');
+        loadReader(summary);
+    } catch(e) {
+        alert('Summarization failed. Loading original text.');
+        loadReader(rawText);
+    }
+    hideOverlay();
+}
+
+// ===== POS TAGGER (called before reading if syntax on) =====
+// Word lists for fast classification — Claude pre-tags for accuracy when syntax enabled
+const fillerSet = new Set(['the','a','an','of','and','but','for','in','to','at','by','with','as','it','is','are','was','were','be','been','being','that','this','these','those','which','so','or','nor','if','then','when','who','what','there','where','into','out','up','down','from','about','also','even','will','would','should','may','might','have','had','do','does','did','not','on','its','his','her','their','our','your','my','his','been','upon','unto','than','such','each','both','all','any','some','most','more','very','just','can','could','shall']);
+const logicSet  = new Set(['therefore','however','moreover','furthermore','nevertheless','although','because','since','unless','except','indeed','thus','hence','whereas','meanwhile','consequently','additionally','alternatively','despite','albeit','conversely','accordingly','otherwise','whereas','thereby','wherein','notwithstanding']);
+// Simple heuristic verb endings
+function looksLikeVerb(w) {
+    return /(?:ed|ing|ize|ise|ify|ate|ens?|ies|ied)$/.test(w) && w.length > 4;
+}
+
+let posTagCache = {}; // word -> class
+
+async function tagTextWithAI(text) {
+    // Sample first 300 unique words for POS tagging — enough for a representative pass
+    const words = [...new Set(text.split(/\s+/).map(w => w.replace(/[^a-zA-Z]/g,'').toLowerCase()))].slice(0, 300).join(' ');
+    try {
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-api-key': getKey(), 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+            body: JSON.stringify({
+                model: 'claude-sonnet-4-20250514',
+                max_tokens: 2000,
+                messages: [{
+                    role: 'user',
+                    content: `For each word below, output "word:N" for noun, "word:V" for verb, "word:O" for other. One per line, no extra text.\n\n${words}`
+                }]
+            })
+        });
+        const data = await res.json();
+        const lines = (data.content?.[0]?.text || '').split('\n');
+        posTagCache = {};
+        lines.forEach(line => {
+            const [word, tag] = line.split(':');
+            if (word && tag) posTagCache[word.trim().toLowerCase()] = tag.trim();
+        });
+    } catch(e) {
+        // fall back to heuristics silently
+    }
+}
+
+function classifyWord(word) {
+    const bare = word.replace(/[^a-zA-Z']/g,'').toLowerCase();
+    if (!bare) return '';
+    if (logicSet.has(bare))  return 'syn-logic';
+    if (fillerSet.has(bare)) return 'syn-filler';
+    const tag = posTagCache[bare];
+    if (tag === 'N') return 'syn-noun';
+    if (tag === 'V') return 'syn-verb';
+    if (looksLikeVerb(bare)) return 'syn-verb';
+    return '';
+}
+
+// ===== LINE BUILDER =====
+function buildLines(text) {
+    const words = text.split(/\s+/).filter(w => w.trim());
+    const row = document.getElementById('row-1');
+    const display = document.getElementById('reader-rows');
+    const maxWidth = display.offsetWidth - 8;
+
+    const ruler = document.createElement('span');
+    ruler.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;' +
+        'font-size:' + getComputedStyle(row).fontSize + ';' +
+        'font-family:' + getComputedStyle(row).fontFamily + ';';
+    document.body.appendChild(ruler);
+
+    const result = [];
+    let chunk = [];
+    for (let i = 0; i < words.length; i++) {
+        chunk.push(words[i]);
+        ruler.textContent = chunk.join(' ');
+        if (ruler.offsetWidth > maxWidth && chunk.length >= 5) {
+            chunk.pop();
+            result.push(chunk.join(' '));
+            chunk = [words[i]];
+        }
+    }
+    if (chunk.length) result.push(chunk.join(' '));
+    document.body.removeChild(ruler);
+    return result;
+}
+
+// ===== READER =====
+function loadReader(text) {
+    readerText = text;
+    posTagCache = {}; // reset tags for new text
+    lines = buildLines(text);
+    lineIdx = 0; wordIdx = 0; transitioning = false;
+    msPerWord = (60 / (parseInt(document.getElementById('reader-wpm').value) || 300)) * 1000;
+
+    document.getElementById('reader-placeholder').style.display = 'none';
+    document.getElementById('reader-rows').style.display = 'flex';
+    document.getElementById('reader-footer').style.display = 'block';
+    hideOverlay();
+    refreshWindow(false);
+    document.getElementById('reader-wrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    // Pre-tag if syntax is on
+    if (document.getElementById('syntax-toggle').checked) {
+        tagTextWithAI(text);
+    }
+}
+
+function rebuildLines() {
+    if (!readerText) return;
+    const was = playing; pause();
+    lines = buildLines(readerText);
+    lineIdx = Math.min(lineIdx, lines.length - 1);
+    transitioning = false; activeRow = 0;
+    refreshWindow(false);
+    if (was) play();
+    // Tag if just enabled
+    if (document.getElementById('syntax-toggle').checked && Object.keys(posTagCache).length === 0) {
+        tagTextWithAI(readerText);
+    }
+}
+
+function getLine(i) { return (i >= 0 && i < lines.length) ? lines[i] : ''; }
+
+function buildRow(el, i) {
+    const s = getLine(i);
+    if (!s) { el.innerHTML = ''; return; }
+    const useSyntax = document.getElementById('syntax-toggle').checked;
+    let wc = 0;
+    el.innerHTML = s.split(/\s+/).map(w => {
+        const cls = useSyntax ? (classifyWord(w) || '') : '';
+        return `<span class="s-word ${cls}" data-wi="${wc++}">${w}</span> `;
+    }).join('');
+}
+
+function getRowEl(r) { return document.getElementById('row-' + r); }
+
+function applyRowClasses() {
+    // row 0 always active, rows 1 & 2 are upcoming (next-row)
+    getRowEl(0).className = 's-row active-row';
+    getRowEl(1).className = 's-row next-row';
+    getRowEl(2).className = 's-row next-row';
+}
+
+function refreshWindow(animate) {
+    if (animate) {
+        // Active is always row 0 — roll everything up
+        getRowEl(0).classList.add('exiting');
+        setTimeout(() => {
+            getRowEl(0).innerHTML = getRowEl(1).innerHTML;
+            getRowEl(1).innerHTML = getRowEl(2).innerHTML;
+            buildRow(getRowEl(2), lineIdx + 1);
+            activeRow = 0;
+            applyRowClasses();
+            getRowEl(2).classList.add('entering');
+            requestAnimationFrame(() => requestAnimationFrame(() => getRowEl(2).classList.remove('entering')));
+            wordSpans = Array.from(getRowEl(0).querySelectorAll('.s-word'));
+            wordIdx = 0; setActive(0); transitioning = false; updateProgress();
+        }, 80);
+    } else {
+        // Initial — active at top, next two lines below
+        activeRow = 0;
+        buildRow(getRowEl(0), lineIdx);
+        buildRow(getRowEl(1), lineIdx + 1);
+        buildRow(getRowEl(2), lineIdx + 2);
+        applyRowClasses();
+        wordSpans = Array.from(getRowEl(0).querySelectorAll('.s-word'));
+        wordIdx = 0; setActive(0); updateProgress();
+    }
+}
+
+function setActive(wi) {
+    wordSpans.forEach(s => {
+        const i = parseInt(s.dataset.wi);
+        s.classList.remove('active-word','past-word');
+        if (i === wi) s.classList.add('active-word');
+        else if (i < wi) s.classList.add('past-word');
+    });
+}
+
+function updateProgress() {
+    const pct = lines.length ? ((lineIdx + 1) / lines.length) * 100 : 0;
+    document.getElementById('progress-fill').style.width = pct + '%';
+    document.getElementById('progress-text').innerText = `Line ${lineIdx + 1} / ${lines.length}`;
+    const wpm = parseInt(document.getElementById('reader-wpm').value) || 300;
+    const wordsLeft = lines.slice(lineIdx).join(' ').split(/\s+/).length;
+    const mins = Math.ceil(wordsLeft / wpm);
+    document.getElementById('time-remaining').innerText = mins + ' min remaining';
+}
+
+function tick() {
+    if (transitioning) return;
+    wordIdx++;
+    if (wordIdx >= wordSpans.length) {
+        if (lineIdx + 1 >= lines.length) {
+            pause();
+            document.getElementById('play-btn').innerText = '✓ Done';
+            return;
+        }
+        transitioning = true;
+        lineIdx++;
+        refreshWindow(true);
+        return;
+    }
+    setActive(wordIdx);
+}
+
+function togglePlay() { playing ? pause() : play(); }
+
+function play() {
+    playing = true;
+    document.getElementById('play-btn').innerText = '⏸ Pause';
+    document.getElementById('play-btn').classList.add('on');
+    timer = setInterval(tick, msPerWord);
+}
+
+function pause() {
+    playing = false;
+    clearInterval(timer);
+    document.getElementById('play-btn').innerText = '▶ Start';
+    document.getElementById('play-btn').classList.remove('on');
+}
+
+function restartReader() {
+    pause();
+    lineIdx = 0; wordIdx = 0; transitioning = false; activeRow = 0;
+    refreshWindow(false);
+}
+
+function updateWpm() {
+    msPerWord = (60 / (parseInt(document.getElementById('reader-wpm').value) || 300)) * 1000;
+    if (playing) { clearInterval(timer); timer = setInterval(tick, msPerWord); }
+}
+
+// ===== OVERLAY =====
+function showOverlay(text, sub) {
+    document.getElementById('overlay-text').innerText = text;
+    document.getElementById('overlay-sub').innerText = sub || '';
+    document.getElementById('overlay').classList.add('show');
+}
+function updateOverlaySub(s) { document.getElementById('overlay-sub').innerText = s; }
+function hideOverlay() { document.getElementById('overlay').classList.remove('show'); }
+
+// ===== RESIZE =====
+window.addEventListener('resize', () => rebuildLines());
+loadKey();
+</script>
+</body>
+</html>
